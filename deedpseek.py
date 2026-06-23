@@ -1,16 +1,3 @@
-#!/usr/bin/env python3
-"""
-Stream resolver - extracts embed URLs from playvideo.php responses.
-With robust rate limiting, exponential backoff, and session management.
-Fixed for headless execution in GitHub Actions environments.
-
-Requires:
-    pip install curl_cffi
-    pip install nodriver
-
-Run:
-    python deedpseek.py "https://multiembed.mov/?video_id=1084244&tmdb=1"
-"""
 
 from __future__ import annotations
 
@@ -719,10 +706,12 @@ async def resolve_with_nodriver(input_url: str, preferred_server=None, all_serve
     started = time.time()
     
     try:
-        # UPDATED: Added browser_args to support GitHub Actions CI environment
+        # UPDATED: We explicitly pass no_sandbox=True as a parameter to uc.start()
+        # and we pass --disable-dev-shm-usage in browser_args to prevent memory limits
         browser = await uc.start(
             headless=False,
-            browser_args=['--no-sandbox', '--disable-setuid-sandbox']
+            no_sandbox=True,
+            browser_args=['--disable-setuid-sandbox', '--disable-dev-shm-usage']
         )
         page = await browser.get(input_url)
         await page.wait_for_timeout(8000)
