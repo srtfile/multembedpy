@@ -1,0 +1,49 @@
+name: Test Stream Resolver
+
+# This allows you to manually trigger the workflow from the Actions tab
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: 'Target URL to resolve'
+        required: true
+        default: 'https://multiembed.mov/?video_id=1339713&tmdb=1'
+      use_nodriver:
+        description: 'Use Nodriver (Headless Browser)?'
+        type: boolean
+        required: false
+        default: false
+
+jobs:
+  run-resolver:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install System Dependencies (for Nodriver)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb chromium-browser
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install curl_cffi nodriver
+
+      - name: Run Script (Standard)
+        if: ${{ !inputs.use_nodriver }}
+        run: |
+          python deedpseek.py "${{ inputs.url }}"
+
+      - name: Run Script (with Nodriver)
+        if: ${{ inputs.use_nodriver }}
+        # xvfb-run fakes a display server, which headless browsers often need in Linux environments
+        run: |
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x1024x24" python deedpseek.py "${{ inputs.url }}" --nodriver
