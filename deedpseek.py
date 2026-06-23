@@ -1,17 +1,3 @@
-#!/usr/bin/env python3
-"""
-Stream resolver - extracts embed URLs from playvideo.php responses.
-With robust rate limiting, exponential backoff, and session management.
-Fixed for headless execution in GitHub Actions environments.
-
-Requires:
-    pip install curl_cffi
-    pip install nodriver
-
-Run:
-    python deedpseek.py "https://multiembed.mov/?video_id=1084244&tmdb=1"
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -56,7 +42,7 @@ DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36"
 )
-USE_NODRIVER = True # Set to True to always use nodriver by default
+USE_NODRIVER = True  # Set to True to always use nodriver by default
 
 # ─── Rate Limiting Configuration ───────────────────────────────────────────
 BASE_DELAY = 3.0          # Base delay between requests (seconds)
@@ -183,12 +169,18 @@ def exponential_backoff(attempt: int, base_delay: float = BASE_DELAY) -> float:
 def is_valid_embed_url(url: str) -> bool:
     if not url or not url.startswith("http"):
         return False
-    skip_patterns = ['.js', '.css', '.png', '.jpg', '.svg', '.ico', '.woff', '.gif', 'googleapis', 'cloudflare', 'gstatic', 'google.com', 'earn-money', 'api-docs', 'help.', 'example.com', '&quot;', '&lt;', '&gt;', '&amp;', 'cdnjs', 'jsdelivr', 'pagead', 'googlesyndication', 'facebook.com', 'twitter.com', 'instagram.com', 'jquery', 'bootstrap', 'fontawesome']
+    skip_patterns = ['.js', '.css', '.png', '.jpg', '.svg', '.ico', '.woff', '.gif',
+                     'googleapis', 'cloudflare', 'gstatic', 'google.com', 'earn-money',
+                     'api-docs', 'help.', 'example.com', '&quot;', '&lt;', '&gt;', '&amp;',
+                     'cdnjs', 'jsdelivr', 'pagead', 'googlesyndication', 'facebook.com',
+                     'twitter.com', 'instagram.com', 'jquery', 'bootstrap', 'fontawesome']
     url_lower = url.lower()
     for pattern in skip_patterns:
         if pattern in url_lower:
             return False
-    embed_patterns = ['/e/', '/embed', '/d/', '/v/', 'vipstream', 'mixdrop', 'vidmoly', 'streamwish', 'streamhls', 'dsvplay', 'voe.sx', 'dood', 'playmogo', 'streamtape', 'netu', 'filelions']
+    embed_patterns = ['/e/', '/embed', '/d/', '/v/', 'vipstream', 'mixdrop', 'vidmoly',
+                      'streamwish', 'streamhls', 'dsvplay', 'voe.sx', 'dood', 'playmogo',
+                      'streamtape', 'netu', 'filelions']
     for pattern in embed_patterns:
         if pattern in url_lower:
             return True
@@ -227,7 +219,10 @@ def request_headers(referer: Optional[str] = None, ajax: bool = False) -> Dict[s
     return headers
 
 
-def http_get_curl_cffi(url: str, *, timeout: int = REQUEST_TIMEOUT, referer: Optional[str] = None, allow_redirects: bool = True, ajax: bool = False) -> Optional[Tuple[int, str, Dict[str, str], str]]:
+def http_get_curl_cffi(
+    url: str, *, timeout: int = REQUEST_TIMEOUT, referer: Optional[str] = None,
+    allow_redirects: bool = True, ajax: bool = False
+) -> Optional[Tuple[int, str, Dict[str, str], str]]:
     if not HAS_CURL_CFFI or not url or not url.startswith("http"):
         return None
     impersonations = ["chrome124", "chrome120", "chrome110", "edge101", "safari15_5"]
@@ -237,7 +232,10 @@ def http_get_curl_cffi(url: str, *, timeout: int = REQUEST_TIMEOUT, referer: Opt
         for impersonate in impersonations[:2]:
             try:
                 session = curl_requests.Session()
-                response = session.get(url, headers=headers, impersonate=impersonate, timeout=timeout, allow_redirects=allow_redirects)
+                response = session.get(
+                    url, headers=headers, impersonate=impersonate,
+                    timeout=timeout, allow_redirects=allow_redirects
+                )
                 return (response.status_code, str(response.url), dict(response.headers), response.text)
             except Exception:
                 continue
@@ -246,7 +244,11 @@ def http_get_curl_cffi(url: str, *, timeout: int = REQUEST_TIMEOUT, referer: Opt
     return None
 
 
-def http_get(url: str, *, timeout: int = REQUEST_TIMEOUT, referer: Optional[str] = None, allow_redirects: bool = True, cf_bypass: bool = True, ajax: bool = False, retry_count: int = 0) -> Tuple[int, str, Dict[str, str], str, Optional[str]]:
+def http_get(
+    url: str, *, timeout: int = REQUEST_TIMEOUT, referer: Optional[str] = None,
+    allow_redirects: bool = True, cf_bypass: bool = True, ajax: bool = False,
+    retry_count: int = 0
+) -> Tuple[int, str, Dict[str, str], str, Optional[str]]:
     if not url or url == "https://" or not url.startswith("http"):
         return 0, url, {}, "", "skipped"
     rate_limit_wait(url)
@@ -254,7 +256,10 @@ def http_get(url: str, *, timeout: int = REQUEST_TIMEOUT, referer: Optional[str]
     while True:
         try:
             if cf_bypass and HAS_CURL_CFFI:
-                result = http_get_curl_cffi(url, timeout=timeout, referer=referer, allow_redirects=allow_redirects, ajax=ajax)
+                result = http_get_curl_cffi(
+                    url, timeout=timeout, referer=referer,
+                    allow_redirects=allow_redirects, ajax=ajax
+                )
                 if result:
                     status = result[0]
                     if status == 429:
@@ -296,7 +301,10 @@ def http_get(url: str, *, timeout: int = REQUEST_TIMEOUT, referer: Optional[str]
             return 0, url, {}, "", "error"
 
 
-def http_post_form(url: str, form: Dict[str, str], *, timeout: int = REQUEST_TIMEOUT, referer: Optional[str] = None, cf_bypass: bool = True, retry_count: int = 0) -> Tuple[int, str, Dict[str, str], str, Optional[str]]:
+def http_post_form(
+    url: str, form: Dict[str, str], *, timeout: int = REQUEST_TIMEOUT,
+    referer: Optional[str] = None, cf_bypass: bool = True, retry_count: int = 0
+) -> Tuple[int, str, Dict[str, str], str, Optional[str]]:
     rate_limit_wait(url)
     _retries = retry_count
     while True:
@@ -306,7 +314,10 @@ def http_post_form(url: str, form: Dict[str, str], *, timeout: int = REQUEST_TIM
                 for impersonate in ["chrome124", "chrome120"]:
                     try:
                         session = curl_requests.Session()
-                        response = session.post(url, data=form, headers=headers, impersonate=impersonate, timeout=timeout)
+                        response = session.post(
+                            url, data=form, headers=headers,
+                            impersonate=impersonate, timeout=timeout
+                        )
                         status = response.status_code
                         if status in (429, 403) and _retries < MAX_RETRIES:
                             delay = exponential_backoff(_retries, 5.0 if status == 403 else 2.0)
@@ -344,27 +355,35 @@ def extract_embed_urls_from_playvideo(html_content: str, base_url: str) -> List[
     for match in IFRAME_SRC_RE.finditer(html_content):
         src = html.unescape(match.group("src")).strip()
         full_url = urllib.parse.urljoin(base_url, src) if src else ""
-        if src and is_valid_embed_url(full_url): urls.append(full_url)
+        if src and is_valid_embed_url(full_url):
+            urls.append(full_url)
     for match in SOURCE_FRAME_RE.finditer(html_content):
         src = match.group(1).strip()
         full_url = urllib.parse.urljoin(base_url, src)
-        if src and is_valid_embed_url(full_url): urls.append(full_url)
+        if src and is_valid_embed_url(full_url):
+            urls.append(full_url)
     for match in DATA_SRC_RE.finditer(html_content):
         src = match.group(1).strip()
         full_url = urllib.parse.urljoin(base_url, src)
-        if src and is_valid_embed_url(full_url): urls.append(full_url)
+        if src and is_valid_embed_url(full_url):
+            urls.append(full_url)
     for match in JS_IFRAME_SRC_RE.finditer(html_content):
         src = match.group(1).strip()
-        if src.startswith('http') and is_valid_embed_url(src): urls.append(src)
-        elif src.startswith('//') and is_valid_embed_url('https:' + src): urls.append('https:' + src)
+        if src.startswith('http') and is_valid_embed_url(src):
+            urls.append(src)
+        elif src.startswith('//') and is_valid_embed_url('https:' + src):
+            urls.append('https:' + src)
     for match in JS_SRC_ASSIGN_RE.finditer(html_content):
         src = match.group(1).strip()
-        if src.startswith('http') and is_valid_embed_url(src): urls.append(src)
-        elif src.startswith('/') and is_valid_embed_url(urllib.parse.urljoin(base_url, src)): urls.append(urllib.parse.urljoin(base_url, src))
+        if src.startswith('http') and is_valid_embed_url(src):
+            urls.append(src)
+        elif src.startswith('/') and is_valid_embed_url(urllib.parse.urljoin(base_url, src)):
+            urls.append(urllib.parse.urljoin(base_url, src))
     all_urls = ANY_URL_RE.findall(html_content)
     for url in all_urls:
         url = url.rstrip('.,;:)!]}\'"')
-        if is_valid_embed_url(url) and url not in urls: urls.append(url)
+        if is_valid_embed_url(url) and url not in urls:
+            urls.append(url)
     return unique_keep_order(urls)
 
 
@@ -382,11 +401,16 @@ def extract_source_choices(response_html: str) -> List[SourceChoice]:
         attrs = attrs_to_dict(match.group("attrs"))
         video_id = attrs.get("data-id")
         server_id = attrs.get("data-server")
-        if not video_id or not server_id: continue
+        if not video_id or not server_id:
+            continue
         end = matches[index + 1].start() if index + 1 < len(matches) else response_html.find("</ul>", match.end())
-        if end < 0: end = min(len(response_html), match.end() + 500)
-        fragment = response_html[match.end() : end]
-        quality_match = re.search(r"""<span\b[^>]*class=(['"])[^'"]*\bquality\b[^'"]*\1[^>]*>(.*?)</span>""", fragment, re.I | re.S)
+        if end < 0:
+            end = min(len(response_html), match.end() + 500)
+        fragment = response_html[match.end():end]
+        quality_match = re.search(
+            r"""<span\b[^>]*class=(['"])[^'"]*\bquality\b[^'"]*\1[^>]*>(.*?)</span>""",
+            fragment, re.I | re.S
+        )
         quality = clean_text(quality_match.group(2)) if quality_match else ""
         label = clean_text(fragment)
         sources.append(SourceChoice(video_id=video_id, server_id=server_id, label=label, quality=quality))
@@ -399,24 +423,30 @@ def attrs_to_dict(raw_attrs: str) -> Dict[str, str]:
 
 def extract_play_token(url_or_html: str) -> Optional[str]:
     match = PLAY_TOKEN_RE.search(url_or_html)
-    if match: return urllib.parse.unquote(match.group(1))
+    if match:
+        return urllib.parse.unquote(match.group(1))
     match = LOAD_SOURCES_RE.search(url_or_html)
-    if match: return match.group("token")
+    if match:
+        return match.group("token")
     return None
 
 
-def resolve_live_raw(input_url: str, preferred_server: Optional[str] = None, all_servers: bool = True) -> ResolveResult:
+def resolve_live_raw(
+    input_url: str, preferred_server: Optional[str] = None, all_servers: bool = True
+) -> ResolveResult:
     result = ResolveResult(input_url=input_url, ok=False, status="live_raw")
     result.used_live_http = True
     start_time = time.time()
     request_count = 0
 
     try:
-        status, final_url, headers, body, bypass_method = http_get(input_url, allow_redirects=False, cf_bypass=True)
+        status, final_url, headers, body, bypass_method = http_get(
+            input_url, allow_redirects=False, cf_bypass=True
+        )
         request_count += 1
         result.cf_bypass_method = bypass_method
         result.steps.append(f"1. Initial GET: HTTP {status}")
-        
+
         location = headers.get("Location") or headers.get("location")
         if location:
             result.play_url = urllib.parse.urljoin(input_url, location)
@@ -427,7 +457,9 @@ def resolve_live_raw(input_url: str, preferred_server: Optional[str] = None, all
             return result
 
         time.sleep(MIN_DELAY_BETWEEN_SERVERS)
-        status, final_url, headers, page, bypass_method = http_get(result.play_url, referer=input_url, cf_bypass=True)
+        status, final_url, headers, page, bypass_method = http_get(
+            result.play_url, referer=input_url, cf_bypass=True
+        )
         request_count += 1
         result.steps.append(f"3. Play page: HTTP {status}, {len(page)} bytes")
         result.play_token = result.play_token or extract_play_token(page)
@@ -435,18 +467,21 @@ def resolve_live_raw(input_url: str, preferred_server: Optional[str] = None, all
         if result.play_token:
             time.sleep(MIN_DELAY_BETWEEN_SERVERS)
             response_url = urllib.parse.urljoin(result.play_url, "/response.php")
-            status, _, _, response_html, bypass_method = http_post_form(response_url, {"token": result.play_token}, referer=result.play_url, cf_bypass=True)
+            status, _, _, response_html, bypass_method = http_post_form(
+                response_url, {"token": result.play_token}, referer=result.play_url, cf_bypass=True
+            )
             request_count += 1
             result.steps.append(f"4. response.php: HTTP {status}, {len(response_html)} bytes")
             result.sources = extract_source_choices(response_html)
             result.steps.append(f"5. Found {len(result.sources)} source(s)")
-            
+
             if not result.sources:
                 result.errors.append("No sources found")
                 return result
-            
+
             sources_to_try = []
-            if all_servers: sources_to_try = result.sources.copy()
+            if all_servers:
+                sources_to_try = result.sources.copy()
             elif preferred_server:
                 for s in result.sources:
                     if s.server_id == preferred_server:
@@ -458,103 +493,196 @@ def resolve_live_raw(input_url: str, preferred_server: Optional[str] = None, all
                     for s in result.sources:
                         if s.server_id == wanted and s not in sources_to_try:
                             sources_to_try.append(s)
-            if not sources_to_try: sources_to_try = result.sources[:5]
-            
+            if not sources_to_try:
+                sources_to_try = result.sources[:5]
+
             result.steps.append(f"6. Processing {len(sources_to_try)} server(s)")
-            
+
             for idx, source in enumerate(sources_to_try):
                 if idx > 0:
                     delay = MIN_DELAY_BETWEEN_SERVERS + random.uniform(0, 2)
                     time.sleep(delay)
-                
-                playvideo_url = urllib.parse.urljoin(result.play_url, f"/playvideo.php?video_id={urllib.parse.quote(source.video_id)}&server_id={urllib.parse.quote(source.server_id)}&token={urllib.parse.quote(result.play_token)}&init=1")
+
+                playvideo_url = urllib.parse.urljoin(
+                    result.play_url,
+                    f"/playvideo.php?video_id={urllib.parse.quote(source.video_id)}"
+                    f"&server_id={urllib.parse.quote(source.server_id)}"
+                    f"&token={urllib.parse.quote(result.play_token)}&init=1"
+                )
                 result.steps.append(f"  Server {source.server_id}: {source.label[:50]}")
-                
+
                 playvideo_html = None
                 for attempt in range(MAX_RETRIES):
                     if attempt > 0:
                         backoff = exponential_backoff(attempt - 1, 3.0)
                         time.sleep(backoff)
-                    status, _, _, html_text, method = http_get(playvideo_url, referer=result.play_url, cf_bypass=True)
+                    status, _, _, html_text, method = http_get(
+                        playvideo_url, referer=result.play_url, cf_bypass=True
+                    )
                     request_count += 1
-                    
-                    if status == 403: continue
-                    if status == 429: continue
+
+                    if status == 403:
+                        continue
+                    if status == 429:
+                        continue
                     if status == 200 and len(html_text) > 500:
                         playvideo_html = html_text
-                        result.steps.append(f"    attempt {attempt+1}: HTTP 200, {len(html_text)} bytes")
+                        result.steps.append(f"    attempt {attempt + 1}: HTTP 200, {len(html_text)} bytes")
                         break
-                    elif status == 200: continue
-                    else: break
-                
-                if not playvideo_html: continue
+                    elif status == 200:
+                        continue
+                    else:
+                        break
+
+                if not playvideo_html:
+                    continue
                 embed_urls = extract_embed_urls_from_playvideo(playvideo_html, playvideo_url)
                 for eu in embed_urls:
-                    if eu not in result.embed_urls: result.embed_urls.append(eu)
-        
+                    if eu not in result.embed_urls:
+                        result.embed_urls.append(eu)
+
         result.embed_urls = unique_keep_order([u for u in result.embed_urls if u and u != "https://"])
         result.ok = bool(result.embed_urls)
         result.status = "ok" if result.ok else "no_embeds"
-        
+
         elapsed = time.time() - start_time
-        result.stats = {"total_requests": request_count, "elapsed_seconds": round(elapsed, 1), "requests_per_second": round(request_count / elapsed, 2) if elapsed > 0 else 0}
+        result.stats = {
+            "total_requests": request_count,
+            "elapsed_seconds": round(elapsed, 1),
+            "requests_per_second": round(request_count / elapsed, 2) if elapsed > 0 else 0,
+        }
         return result
-        
+
     except Exception as exc:
         result.status = "error"
         result.errors.append(f"{type(exc).__name__}: {exc}")
-        result.stats = {"total_requests": request_count, "elapsed_seconds": round(time.time() - start_time, 1)}
+        result.stats = {
+            "total_requests": request_count,
+            "elapsed_seconds": round(time.time() - start_time, 1),
+        }
         return result
 
 
-async def resolve_with_nodriver(input_url: str, preferred_server=None, all_servers=True, timeout_ms=60000) -> ResolveResult:
+def _detect_chrome_binary() -> Optional[str]:
+    """
+    Detect a usable Chrome/Chromium binary.
+
+    Checks (in order):
+      1. CHROME_BIN  environment variable  (set by the GHA workflow step)
+      2. CHROMIUM_BIN environment variable
+      3. Common Linux / CI paths
+      4. macOS application bundle
+      5. Windows default install path
+    """
+    candidates = [
+        os.environ.get("CHROME_BIN", ""),
+        os.environ.get("CHROMIUM_BIN", ""),
+        # Linux – standard / CI
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/google-chrome-unstable",
+        "/usr/bin/chromium-browser",
+        "/usr/bin/chromium",
+        "/snap/bin/chromium",
+        "/usr/local/bin/chromium",
+        # macOS
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/Applications/Chromium.app/Contents/MacOS/Chromium",
+        # Windows
+        r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+    ]
+    for candidate in candidates:
+        if candidate and Path(candidate).exists():
+            return candidate
+    return None
+
+
+async def resolve_with_nodriver(
+    input_url: str, preferred_server=None, all_servers=True, timeout_ms=60000
+) -> ResolveResult:
     if not HAS_NODRIVER:
         result = ResolveResult(input_url=input_url, ok=False, status="nodriver_not_installed")
         result.errors.append("nodriver not installed")
         return result
-    
+
     result = ResolveResult(input_url=input_url, ok=False, status="nodriver")
     result.used_nodriver = True
     result.cf_bypass_method = "nodriver"
     started = time.time()
     browser = None
-    
+
     try:
-        # Create explicit config for Linux/Docker/GitHub Actions
+        # ── Chrome binary detection (GitHub Actions / Docker / local) ──────
+        chrome_path = _detect_chrome_binary()
+        if chrome_path:
+            print(f"[nodriver] Using Chrome binary: {chrome_path}", file=sys.stderr)
+        else:
+            print("[nodriver] Chrome binary not found via env/paths; nodriver will try its own discovery.", file=sys.stderr)
+
+        # ── Build config for headless CI execution ─────────────────────────
         config = uc.Config()
-        config.headless = True # Enforce headless mode for CI stability
-        config.add_argument('--no-sandbox')
-        config.add_argument('--disable-setuid-sandbox')
-        config.add_argument('--disable-dev-shm-usage')
-        config.add_argument('--disable-gpu')
-        
+        config.headless = True  # Enforce headless mode for CI stability
+
+        # Provide the detected binary path when available
+        if chrome_path:
+            config.browser_executable_path = chrome_path
+
+        # Sandbox / security flags required for root/container environments
+        config.add_argument("--no-sandbox")
+        config.add_argument("--disable-setuid-sandbox")
+
+        # Resource / stability flags for low-memory CI runners
+        config.add_argument("--disable-dev-shm-usage")
+        config.add_argument("--disable-gpu")
+        config.add_argument("--disable-software-rasterizer")
+
+        # Noise-reduction flags that speed up page loads in CI
+        config.add_argument("--disable-extensions")
+        config.add_argument("--disable-background-networking")
+        config.add_argument("--disable-default-apps")
+        config.add_argument("--disable-sync")
+        config.add_argument("--disable-translate")
+        config.add_argument("--no-first-run")
+        config.add_argument("--no-default-browser-check")
+        config.add_argument("--mute-audio")
+        config.add_argument("--hide-scrollbars")
+        config.add_argument("--window-size=1920,1080")
+
         browser = await uc.start(config=config)
-        
+
         page = await browser.get(input_url)
         await page.wait_for_timeout(8000)
         page_content = await page.get_content()
         result.play_token = extract_play_token(page_content) or extract_play_token(input_url)
         current_url = await page.evaluate("window.location.href")
         result.embed_urls = extract_embed_urls_from_playvideo(page_content, current_url)
-        
+
     except Exception as e:
         result.errors.append(f"nodriver: {e}")
+        traceback.print_exc(file=sys.stderr)
     finally:
-        # Prevent the "Event loop is closed" crash by cleaning up properly
+        # Prevent the "Event loop is closed" crash by cleaning up gracefully
         if browser:
             try:
                 browser.stop()
             except Exception:
                 pass
-        await asyncio.sleep(0.5) 
-        
+        await asyncio.sleep(0.5)
+
     result.ok = bool(result.embed_urls)
     result.status = "ok" if result.ok else "no_embeds"
     result.stats = {"elapsed_seconds": round(time.time() - started, 1)}
     return result
 
 
-def resolve(input_url: str, *, live: bool = True, preferred_server: Optional[str] = None, all_servers: bool = True, use_nodriver: bool = False) -> ResolveResult:
+def resolve(
+    input_url: str, *,
+    live: bool = True,
+    preferred_server: Optional[str] = None,
+    all_servers: bool = True,
+    use_nodriver: bool = False,
+) -> ResolveResult:
     if use_nodriver and HAS_NODRIVER:
         result = asyncio.run(resolve_with_nodriver(input_url, preferred_server, all_servers))
         if result.ok:
@@ -568,8 +696,9 @@ def resolve(input_url: str, *, live: bool = True, preferred_server: Optional[str
             result.ok = bool(result.embed_urls)
             result.status = "ok" if result.ok else result.status
         return result
-    
-    if live: return resolve_live_raw(input_url, preferred_server, all_servers)
+
+    if live:
+        return resolve_live_raw(input_url, preferred_server, all_servers)
     return ResolveResult(input_url=input_url, ok=False, status="not_started")
 
 
@@ -591,7 +720,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 server_id = (params.get("server") or [None])[0]
                 all_servers = (params.get("all") or ["1"])[0] not in ("0", "false", "False")
                 use_nodriver = (params.get("nodriver") or [str(USE_NODRIVER)])[0] not in ("0", "false", "False")
-                result = resolve(input_url, preferred_server=server_id, all_servers=all_servers, use_nodriver=use_nodriver)
+                result = resolve(
+                    input_url, preferred_server=server_id,
+                    all_servers=all_servers, use_nodriver=use_nodriver
+                )
                 self.write_json(result.to_jsonable())
                 return
             self.write_json({"ok": False, "error": "Not found"}, status=404)
