@@ -1,0 +1,9 @@
+# deedpseek.py runtime dependencies
+# Both packages are optional — the script falls back gracefully if either is absent,
+# but full functionality (Cloudflare bypass + headless Chrome) requires both.
+
+# Browser-impersonation HTTP client (Cloudflare bypass without a real browser)
+curl_cffi>=0.7.0
+
+# Headless Chrome automation via Chrome DevTools Protocol
+nodriver>=0.36
