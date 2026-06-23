@@ -2,9 +2,11 @@
 """
 Stream resolver - extracts embed URLs from playvideo.php responses.
 With robust rate limiting, exponential backoff, and session management.
+Fixed for headless execution in GitHub Actions environments.
 
 Requires:
     pip install curl_cffi
+    pip install nodriver
 
 Run:
     python deedpseek.py "https://multiembed.mov/?video_id=1084244&tmdb=1"
@@ -710,12 +712,18 @@ async def resolve_with_nodriver(input_url: str, preferred_server=None, all_serve
         result = ResolveResult(input_url=input_url, ok=False, status="nodriver_not_installed")
         result.errors.append("nodriver not installed")
         return result
+    
     result = ResolveResult(input_url=input_url, ok=False, status="nodriver")
     result.used_nodriver = True
     result.cf_bypass_method = "nodriver"
     started = time.time()
+    
     try:
-        browser = await uc.start(headless=False)
+        # UPDATED: Added browser_args to support GitHub Actions CI environment
+        browser = await uc.start(
+            headless=False,
+            browser_args=['--no-sandbox', '--disable-setuid-sandbox']
+        )
         page = await browser.get(input_url)
         await page.wait_for_timeout(8000)
         page_content = await page.get_content()
@@ -723,9 +731,11 @@ async def resolve_with_nodriver(input_url: str, preferred_server=None, all_serve
         current_url = await page.evaluate("window.location.href")
         result.embed_urls = extract_embed_urls_from_playvideo(page_content, current_url)
         await browser.stop()
+        
     except Exception as e:
         result.errors.append(f"nodriver: {e}")
         return result
+        
     result.ok = bool(result.embed_urls)
     result.status = "ok" if result.ok else "no_embeds"
     result.stats = {"elapsed_seconds": round(time.time() - started, 1)}
