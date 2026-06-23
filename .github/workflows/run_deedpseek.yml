@@ -1,0 +1,270 @@
+name: Stream Resolver (deedpseek)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# TRIGGERS
+# ─────────────────────────────────────────────────────────────────────────────
+on:
+  # Manual trigger via GitHub UI  →  Actions → "Run workflow"
+  workflow_dispatch:
+    inputs:
+      url:
+        description: >
+          Video embed URL to resolve
+          (e.g. https://multiembed.mov/?video_id=1084244&tmdb=1)
+        required: false
+        default: "https://multiembed.mov/?video_id=1339713&tmdb=1"
+        type: string
+
+      server_id:
+        description: "Preferred server ID — leave blank to try all servers"
+        required: false
+        default: ""
+        type: string
+
+      single_server:
+        description: "Only use the preferred server ID (skip all others)"
+        required: false
+        default: false
+        type: boolean
+
+      use_nodriver:
+        description: "Use headless Chrome (nodriver) as primary resolver"
+        required: false
+        default: true
+        type: boolean
+
+  # ── Scheduled run (uncomment + adjust cron if you want periodic runs) ────
+  # schedule:
+  #   - cron: "0 3 * * *"   # daily at 03:00 UTC
+
+# ─────────────────────────────────────────────────────────────────────────────
+# JOBS
+# ─────────────────────────────────────────────────────────────────────────────
+jobs:
+  resolve:
+    name: Resolve Stream URLs
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      # ── 1. Checkout ────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # ── 2. Python setup ────────────────────────────────────────────────────
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # ── 3. Install Python dependencies ─────────────────────────────────────
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          echo "--- Installed packages ---"
+          pip list | grep -E "curl.cffi|nodriver"
+
+      # ── 4. Verify / install Google Chrome ──────────────────────────────────
+      #   ubuntu-latest already ships Google Chrome.
+      #   This step verifies it is present and exports CHROME_BIN so that
+      #   deedpseek.py can find the binary without guessing.
+      - name: Verify Chrome installation
+        id: chrome
+        run: |
+          # Try the pre-installed binary first
+          if command -v google-chrome &>/dev/null; then
+            CHROME_PATH="$(command -v google-chrome)"
+          elif command -v google-chrome-stable &>/dev/null; then
+            CHROME_PATH="$(command -v google-chrome-stable)"
+          elif command -v chromium-browser &>/dev/null; then
+            CHROME_PATH="$(command -v chromium-browser)"
+          elif command -v chromium &>/dev/null; then
+            CHROME_PATH="$(command -v chromium)"
+          else
+            echo "::notice::Chrome not found on PATH — downloading stable deb…"
+            wget -q -O /tmp/chrome.deb \
+              https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+            sudo apt-get install -y /tmp/chrome.deb 2>&1 | tail -5
+            CHROME_PATH="$(command -v google-chrome)"
+          fi
+
+          echo "Chrome binary: $CHROME_PATH"
+          "$CHROME_PATH" --version
+
+          # Export for subsequent steps
+          echo "CHROME_BIN=$CHROME_PATH" >> "$GITHUB_ENV"
+          echo "chrome_path=$CHROME_PATH" >> "$GITHUB_OUTPUT"
+
+      # ── 5. Resolve stream URLs ─────────────────────────────────────────────
+      - name: Resolve stream URLs
+        id: resolve
+        env:
+          # Use workflow_dispatch inputs; fall back to defaults for scheduled runs
+          INPUT_URL:     ${{ github.event.inputs.url || 'https://multiembed.mov/?video_id=1339713&tmdb=1' }}
+          SERVER_ID:     ${{ github.event.inputs.server_id || '' }}
+          SINGLE_SERVER: ${{ github.event.inputs.single_server || 'false' }}
+          USE_NODRIVER:  ${{ github.event.inputs.use_nodriver || 'true' }}
+          # Chrome binary detected in the previous step
+          CHROME_BIN:    ${{ env.CHROME_BIN }}
+        run: |
+          set +e   # capture exit code manually
+
+          # Build argument list
+          ARGS=("$INPUT_URL")
+          [[ -n "$SERVER_ID" ]]           && ARGS+=("--server-id" "$SERVER_ID")
+          [[ "$SINGLE_SERVER" == "true" ]] && ARGS+=("--single")
+          [[ "$USE_NODRIVER"  != "false" ]] && ARGS+=("--nodriver")
+
+          echo "::group::deedpseek.py arguments"
+          echo "Args: ${ARGS[*]}"
+          echo "CHROME_BIN: $CHROME_BIN"
+          echo "::endgroup::"
+
+          echo "::group::Running deedpseek.py"
+          # -u → unbuffered stdout so logs stream in real-time
+          python -u deedpseek.py "${ARGS[@]}" 2>&1 | tee /tmp/raw_output.txt
+          SCRIPT_EXIT="${PIPESTATUS[0]}"
+          echo "::endgroup::"
+
+          # Extract just the JSON block (last {...} in output)
+          python3 - <<'PYEOF'
+          import sys, json, re
+          raw = open('/tmp/raw_output.txt').read()
+          # Find the last top-level JSON object
+          matches = list(re.finditer(r'\{', raw))
+          for m in reversed(matches):
+              try:
+                  obj = json.loads(raw[m.start():])
+                  with open('result.json', 'w') as f:
+                      json.dump(obj, f, indent=2, ensure_ascii=False)
+                  print("result.json written OK")
+                  sys.exit(0)
+              except Exception:
+                  continue
+          # Fallback: write the whole raw output
+          with open('result.json', 'w') as f:
+              json.dump({"ok": False, "raw": raw, "status": "parse_error"}, f, indent=2)
+          print("result.json written (parse fallback)")
+          PYEOF
+
+          # Map exit codes to a human-readable status
+          case "$SCRIPT_EXIT" in
+            0) RESOLVE_STATUS="ok"        ;;
+            2) RESOLVE_STATUS="no_embeds" ;;
+            *) RESOLVE_STATUS="error"     ;;
+          esac
+          echo "resolve_status=$RESOLVE_STATUS" >> "$GITHUB_OUTPUT"
+
+          # Count found embed URLs
+          EMBED_COUNT=$(python3 -c "
+          import json
+          try:
+              data = json.load(open('result.json'))
+              print(len(data.get('embed_urls', [])))
+          except:
+              print(0)
+          " 2>/dev/null)
+          echo "embed_count=${EMBED_COUNT:-0}" >> "$GITHUB_OUTPUT"
+
+          echo "Script exit code: $SCRIPT_EXIT  |  Status: $RESOLVE_STATUS  |  Embeds: $EMBED_COUNT"
+
+          # Exit 0 (ok) and 2 (no_embeds) are both non-fatal for the workflow
+          [[ "$SCRIPT_EXIT" -le 2 ]] && exit 0 || exit "$SCRIPT_EXIT"
+
+      # ── 6. Upload result JSON artifact ─────────────────────────────────────
+      - name: Upload result JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stream-resolve-result-${{ github.run_number }}
+          path: result.json
+          retention-days: 7
+          if-no-files-found: warn
+
+      # ── 7. Write job summary ───────────────────────────────────────────────
+      - name: Write job summary
+        if: always()
+        env:
+          RESOLVE_STATUS: ${{ steps.resolve.outputs.resolve_status || 'unknown' }}
+          EMBED_COUNT:    ${{ steps.resolve.outputs.embed_count || '0' }}
+          INPUT_URL:      ${{ github.event.inputs.url || 'https://multiembed.mov/?video_id=1339713&tmdb=1' }}
+          USE_NODRIVER:   ${{ github.event.inputs.use_nodriver || 'true' }}
+          CHROME_PATH:    ${{ steps.chrome.outputs.chrome_path }}
+        run: |
+          STATUS_EMOJI="❓"
+          case "$RESOLVE_STATUS" in
+            ok)        STATUS_EMOJI="✅" ;;
+            no_embeds) STATUS_EMOJI="⚠️" ;;
+            error)     STATUS_EMOJI="❌" ;;
+          esac
+
+          {
+            echo "## 🎬 Stream Resolver — Run #${{ github.run_number }}"
+            echo ""
+            echo "| Field | Value |"
+            echo "|-------|-------|"
+            echo "| **Status** | ${STATUS_EMOJI} \`${RESOLVE_STATUS}\` |"
+            echo "| **Embed URLs found** | **${EMBED_COUNT}** |"
+            echo "| **Input URL** | \`${INPUT_URL}\` |"
+            echo "| **nodriver** | \`${USE_NODRIVER}\` |"
+            echo "| **Chrome binary** | \`${CHROME_PATH}\` |"
+            echo "| **Triggered by** | \`${{ github.actor }}\` |"
+            echo "| **Run link** | [${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) |"
+            echo ""
+
+            if [[ -f result.json ]]; then
+              echo "### Embed URLs"
+              echo '```'
+              python3 - <<'PYEOF'
+          import json
+          try:
+              data = json.load(open('result.json'))
+              urls = data.get('embed_urls', [])
+              if urls:
+                  for u in urls:
+                      print(u)
+              else:
+                  print('(none found)')
+          except Exception as e:
+              print(f'(could not parse result.json: {e})')
+          PYEOF
+              echo '```'
+
+              echo ""
+              echo "### Resolution Steps"
+              echo '```'
+              python3 - <<'PYEOF'
+          import json
+          try:
+              data = json.load(open('result.json'))
+              for s in data.get('steps', []):
+                  print(s)
+              errs = data.get('errors', [])
+              if errs:
+                  print('')
+                  print('--- ERRORS ---')
+                  for e in errs:
+                      print(e)
+          except Exception as e:
+              print(f'(could not parse: {e})')
+          PYEOF
+              echo '```'
+
+              echo ""
+              echo "### Stats"
+              echo '```json'
+              python3 - <<'PYEOF'
+          import json
+          try:
+              data = json.load(open('result.json'))
+              print(json.dumps(data.get('stats', {}), indent=2))
+          except:
+              print('{}')
+          PYEOF
+              echo '```'
+            else
+              echo "> ⚠️ `result.json` not found — script may have crashed before producing output."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
